@@ -65,7 +65,7 @@ View(fc)
 
 ```{r}
 
-daily_p <- fc %>% 
+daily_p1 <- fc %>% 
   bind_rows(af_p) %>%
   mutate(date = as.Date(valid)) %>%
   group_by(date, station, lon, lat) %>%
@@ -106,14 +106,14 @@ animate(p1, nframes=nrow(slice_p))
 p2 <- ggplot(daily_p,aes(x=date,y=mean_temp,color=station,group=station)) + 
   geom_line() + 
   geom_point() +
-  labs(title = '100 mile temp diff', x='Date',y= 'Mean Temp (f)') + 
+  labs(title = '100 mile temp diff', x='Date',y= 'Mean Temp (f)') +
   transition_reveal(date) + 
   scale_color_few()
 
 
 animate(p2, nframes=nrow(daily_p))
 
-
+p2
 
 ```
 
@@ -124,22 +124,28 @@ animate(p2, nframes=nrow(daily_p))
 ```{r}
 usa <- us_states()
 
+counties <- us_counties()
+
+
 co <- usa %>%
   filter(name == 'Colorado')
 
-sf_p <- daily_p %>%
+sf_p <- daily_p1 %>%
   st_as_sf(coords=c('lon','lat'),crs=4326)
 
 
 co_elev <- elevatr::get_elev_raster(co,z=6)
 
 tm_shape(co) + 
-  tm_polygons() + 
+  tm_polygons(alpha = 0) +
   tm_shape(co_elev) +
-  tm_raster(style='cont',palette = 'Greens') + 
+  tm_raster(style='cont',palette = '-viridis') + 
   tm_shape(sf_p) + 
-  tm_dots(col='station',size=3,palette=c('red','white'))
-
+  tm_dots(col='station',size=3,palette=c('red','white')) +
+  tm_shape(counties) +
+  tm_polygons(col = NA, alpha = 0) 
+#use line below to explore different color palettes
+#tmaptools::palette_explorer()
 ```
 
 
@@ -165,7 +171,7 @@ basemap <- tm_shape(co) +
 full_dates <- unique(sf_p$date)
 
 sequence <- 1:length(full_dates)
-saveVideo({
+saveGIF({
   for(i in sequence){
   sub_sf <- sf_p %>%
     filter(date == full_dates[i]) %>%
@@ -187,7 +193,7 @@ saveVideo({
                         col=c('red','white'),
                         title='Station'))
   }
-},movie.name = 'precip_flash.mp4',
+},movie.name = 'precip_flash.gif',
   interval=0.05,
   ani.width=1000,
   ani.height=800)
@@ -238,7 +244,7 @@ daily_sf <- daily_p %>%
 full_dates <- unique(daily_sf$date)
 
 sequence <- 1:length(full_dates)
-saveVideo({
+saveGIF({
   for(i in sequence){
   sub_sf <- daily_sf %>%
     filter(date == full_dates[i]) %>%
@@ -261,12 +267,13 @@ saveVideo({
           tm_layout(title=full_dates[i],
         legend.position=c(0.7,0.2)))
   }
-},movie.name = 'precip_flash_all.mp4',
+},movie.name = 'precip_flash_all.gif',
   interval=0.12,
   ani.width=1000,
   ani.height=800)
 
 
+?saveGIF
 
 ```
 
@@ -280,6 +287,33 @@ Make a video showing the correlation between Air Force Academy and Fort Collins
 between the min, mean, and max temps. The movie should cover the full year. 
 
 ```{r}
+#putting all of the temperature values into 1 col
+long_daily_p <- pivot_longer(daily_p1, c(mean_temp, max_temp, min_temp), names_to = "temp")
+
+#taking the station names and creating value columns for each station
+station_daily_p <- pivot_wider(long_daily_p, names_from = station, values_from = value)
+
+#grouping by station to filter out NAs
+aff <- station_daily_p %>%
+  select(1,5,6) %>%
+  filter(!is.na(AFF))
+
+fnl <- station_daily_p %>%
+  select(1,5,7) %>%
+  filter(!is.na(FNL))
+
+#joining filtered stations
+fs_daily_p <- inner_join(aff, fnl, by = c('date','temp'))
+
+
+p3 <- ggplot(fs_daily_p,aes(x = FNL,y = AFF, color = temp)) + 
+  geom_line() +
+  geom_point() +
+  labs(title = '100 mile temp diff 10/18-10/19', x='FNL Temp(f)',y= 'AFF Temp (f)') +
+  transition_reveal(date) + 
+  scale_color_few()
+
+animate(p3, nframes=(nrow(fs_daily_p)))
 
 ```
 
@@ -295,5 +329,58 @@ style (change the background, add other layers (like counties or cities)), etc..
 
 ```{r}
 load('DailyP.RData')
+
+#testing look of map
+tm_shape(co) + 
+  tm_polygons(alpha = 0) +
+  tm_shape(co_elev) +
+  tm_raster(style='cont',palette = '-viridis') + 
+  tm_shape(sf_p) + 
+  tm_dots(col='station',size=3,palette=c('red','white')) +
+  tm_shape(counties) +
+  tm_polygons(col = NA, alpha = 0) 
+#use line below to explore different color palettes
+#tmaptools::palette_explorer()
+
+#basemap for the creation of GIF below
+basemap1 <- tm_shape(co) + 
+    tm_polygons() + 
+  tm_shape(co_elev) +
+    tm_raster(style='cont',
+              palette = '-viridis',
+              title='Elevation (m)') +
+  tm_shape(counties) +
+    tm_polygons(col = NA, alpha = 0)
+
+#not sure if this generation works as I coulnd't get it to generate within a reasonable time
+#on my laptop ¯\_(ツ)_/¯ 
+saveGIF({
+  for(i in sequence){
+  sub_sf <- daily_sf %>%
+    filter(date == full_dates[i]) %>%
+    filter(daily_p > 0)
+  
+
+  if(nrow(sub_sf) > 0){
+  finalmap <- basemap1 + tm_shape(sub_sf) + 
+    tm_dots(title.size='Daily Precip (in)',
+            col='lon',
+            size='daily_p',
+            style='cont',
+            palette='Greys',
+            legend.show = F,
+            size.max=19,
+            scale=3.5,
+            sizes.legend=c(0,1,5,10,20))
+  }else{finalmap <- basemap1}
+  print(finalmap + 
+          tm_layout(title=full_dates[i],
+        legend.position=c(0.7,0.2)))
+  }
+},movie.name = 'precip_flash.gif',
+  interval=0.12,
+  ani.width=1000,
+  ani.height=800)
+
 ```
 
